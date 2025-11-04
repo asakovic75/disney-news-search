@@ -12,12 +12,39 @@ st.set_page_config(page_title="Новости и Обсуждения Disney", l
 
 st.markdown("""
 <style>
-    .stApp { background-color: #f0f2f6; }
-    .st-emotion-cache-16txtl3 { padding-top: 2rem; }
+    /* Устанавливаем светлый фон для всего приложения */
+    .stApp {
+        background-color: #f0f2f6; /* Светло-серый фон */
+    }
+
+    /* Делаем весь основной текст и подписи черными для лучшей читаемости */
+    body, p, .st-emotion-cache-16txtl3, .st-emotion-cache-1629p8f p, .st-emotion-cache-1xarl3l {
+        color: #111111;
+    }
+
+    /* Делаем заголовки тоже черными */
+    h1, h2, h3, h4, h5, h6 {
+        color: #111111 !important;
+    }
+    
+    /* Убираем лишний верхний отступ */
+    .st-emotion-cache-16txtl3 {
+        padding-top: 2rem;
+    }
+    
+    /* Стилизуем контейнер с комментарием, чтобы он был заметным на сером фоне */
+    .st-emotion-cache-4d1qr0 {
+        border-left: 5px solid #007bff; /* Синяя полоска слева */
+        padding: 10px 15px;
+        background-color: #ffffff; /* Белый фон для блока с комментарием */
+        border-radius: 5px;
+        color: #111111; /* Черный текст внутри комментария */
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
-# --- ИЗМЕНЕНИЕ: Создаем асинхронный менеджер контекста для управления подключениями ---
+# --- Асинхронный менеджер контекста для управления подключениями к БД ---
 @asynccontextmanager
 async def get_db_client():
     """Создает клиент, отдает его и гарантированно закрывает после использования."""
@@ -36,7 +63,7 @@ async def get_db_client():
         if client:
             await client.close()
 
-# --- ИЗМЕНЕНИЕ: Все функции теперь используют 'async with' для получения клиента ---
+# --- Асинхронные функции для работы с базой данных ---
 async def init_db_async():
     async with get_db_client() as db:
         await db.execute("""
@@ -60,7 +87,7 @@ async def get_comments_async():
         rs = await db.execute("SELECT name, comment, created_at FROM comments ORDER BY created_at DESC;")
         return pd.DataFrame(rs.rows, columns=[col for col in rs.columns])
 
-# --- Функция для получения новостей (остается без изменений) ---
+# --- Функция для получения новостей ---
 @st.cache_data(ttl=3600)
 def fetch_news(search_query, in_title=False):
     api_key = os.getenv("NEWS_API_KEY")
@@ -83,11 +110,10 @@ def fetch_news(search_query, in_title=False):
     except Exception as e:
         return None, f"Ошибка сети: {e}"
 
-# --- Инициализация БД при первом запуске ---
-# Этот вызов создает таблицу, если ее нет.
+# --- Инициализация БД ---
 asyncio.run(init_db_async())
 
-# === НАЧАЛО ИНТЕРФЕЙСА ПРИЛОЖЕНИЯ ===
+# === ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ===
 st.title("🌐 Новости и Обсуждения Вселенной Disney")
 st.divider()
 
@@ -135,7 +161,7 @@ with st.form("comment_form", clear_on_submit=True):
         if name and comment:
             asyncio.run(add_comment_async(name, comment))
             st.success("Спасибо, ваш комментарий добавлен!")
-            st.experimental_rerun() # Обновляем страницу, чтобы сразу увидеть новый комментарий
+            st.experimental_rerun()
         else:
             st.warning("Пожалуйста, заполните все поля.")
 
@@ -150,7 +176,6 @@ else:
             created_time = row['created_at']
             if isinstance(created_time, str):
                 try:
-                    # Пробуем разные форматы, так как база данных может возвращать разные строки
                     created_time = datetime.strptime(created_time, '%Y-%m-%d %H:%M:%S.%f')
                 except ValueError:
                     created_time = datetime.fromisoformat(created_time)
