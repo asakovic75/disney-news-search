@@ -3,6 +3,8 @@ import requests
 import os
 from datetime import datetime
 import libsql_client
+import asyncio
+import pandas as pd
 
 # --- Настройки страницы ---
 st.set_page_config(page_title="Новости и Обсуждения Disney", layout="wide")
@@ -14,13 +16,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- Подключение к базе данных ---
 db_url = os.getenv("TURSO_URL")
 db_token = os.getenv("TURSO_TOKEN")
 db_client = None
 
 if db_url and db_token:
     try:
-        # Создаем клиент для подключения к БД
         db_client = libsql_client.create_client(url=db_url, auth_token=db_token)
     except Exception as e:
         st.error(f"Не удалось создать клиент для базы данных: {e}")
@@ -29,10 +31,9 @@ else:
     st.error("Не удалось подключиться к базе данных комментариев. Проверьте секреты TURSO_URL и TURSO_TOKEN в Streamlit Cloud.")
     st.stop()
 
-# --- Функции для работы с базой данных ---
-def init_db():
+async def init_db_async():
     if db_client:
-        db_client.execute("""
+        await db_client.execute("""
             CREATE TABLE IF NOT EXISTS comments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -41,21 +42,20 @@ def init_db():
             );
         """)
 
-def add_comment(name, comment):
+async def add_comment_async(name, comment):
     if db_client:
-        db_client.execute(
+        await db_client.execute(
             "INSERT INTO comments (name, comment, created_at) VALUES (?, ?, ?)",
             [name, comment, datetime.now()]
         )
 
-def get_comments():
+async def get_comments_async():
     if db_client:
-        rs = db_client.execute("SELECT name, comment, created_at FROM comments ORDER BY created_at DESC;")
+        rs = await db_client.execute("SELECT name, comment, created_at FROM comments ORDER BY created_at DESC;")
         return pd.DataFrame(rs.rows, columns=[col for col in rs.columns])
     return pd.DataFrame()
 
-
-# --- Функция для получения новостей ---
+# Функция для получения новостей
 @st.cache_data(ttl=3600)
 def fetch_news(search_query, in_title=False):
     api_key = os.getenv("NEWS_API_KEY")
@@ -78,9 +78,7 @@ def fetch_news(search_query, in_title=False):
     except Exception as e:
         return None, f"Ошибка сети: {e}"
 
-# --- Инициализация базы данных ---
-init_db()
-
+asyncio.run(init_db_async())
 
 # === НАЧАЛО ИНТЕРФЕЙСА ПРИЛОЖЕНИЯ ===
 st.title("🌐 Новости и Обсуждения Вселенной Disney")
@@ -128,22 +126,21 @@ with st.form("comment_form", clear_on_submit=True):
     submitted = st.form_submit_button("Отправить комментарий")
     if submitted:
         if name and comment:
-            add_comment(name, comment)
+            asyncio.run(add_comment_async(name, comment))
             st.success("Спасибо, ваш комментарий добавлен!")
         else:
             st.warning("Пожалуйста, заполните все поля.")
 
 st.subheader("Последние комментарии")
-all_comments = get_comments()
+all_comments = asyncio.run(get_comments_async())
 
 if all_comments.empty:
     st.info("Комментариев пока нет. Будьте первым!")
 else:
     for index, row in all_comments.iterrows():
         with st.container():
-            if isinstance(row['created_at'], str):
-                created_time = datetime.fromisoformat(row['created_at'])
-            else:
-                created_time = row['created_at']
+            created_time = row['created_at']
+            if isinstance(created_time, str):
+                created_time = datetime.fromisoformat(created_time)
             st.text(f"👤 {row['name']} | 🕓 {created_time.strftime('%d.%m.%Y %H:%M')}")
             st.info(row['comment'])
