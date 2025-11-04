@@ -3,6 +3,7 @@ import requests
 import os
 from datetime import datetime
 from urllib.parse import quote
+import json
 
 # --- Настройки страницы ---
 st.set_page_config(page_title="Новости Вселенной Disney", layout="wide")
@@ -17,101 +18,82 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Функция для получения новостей ---
 @st.cache_data(ttl=3600)
-def fetch_news(search_query):
-    api_key = os.getenv("NEWS_API_KEY")
+def fetch_google_news(search_query):
+    """Ищет новости через Google News API от Serper.dev."""
+    api_key = os.getenv("SERPER_API_KEY")
     if not api_key:
-        return None, "Ключ API для новостей не найден."
-    
-    encoded_query = quote(search_query)
-    
-    url = (f"https://newsapi.org/v2/everything?"
-           f"qInTitle={encoded_query}&"
-           f"language=ru&"
-           f"sortBy=publishedAt&"
-           f"apiKey={api_key}")
-    
+        return None, "Ключ SERPER_API_KEY не найден в секретах."
+
+    url = "https://google.serper.dev/news"
+    payload = json.dumps({"q": search_query, "gl": "ru", "hl": "ru"})
+    headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
+
     try:
-        response = requests.get(url)
+        response = requests.post(url, headers=headers, data=payload)
         if response.status_code == 200:
-            return response.json().get("articles", []), None
+            results = response.json().get("news", [])
+            return results, None
         else:
-            return None, f"Ошибка API. Статус: {response.status_code}"
+            return None, f"Ошибка API Serper. Статус: {response.status_code}, Ответ: {response.text}"
     except Exception as e:
         return None, f"Ошибка сети: {e}"
 
 # === ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ===
-st.title("🌐 Дайджест новостей вселенной Disney")
+st.title("🌐 Дайджест Новостей Вселенной Disney")
+st.write("Поиск актуальных новостей на любых сайтах, включая официальные источники и тематические блоги.")
 st.divider()
 
 # --- Раздел "Последние актуальные новости" ---
 st.header("🔥 Последние актуальные новости")
 
-# детализированный список ключевых слов
 relevant_keywords = (
-    'Disney OR "The Walt Disney Company" OR '
-    'Pixar OR "Pixar Animation Studios" OR '
-    'Marvel OR "Marvel Studios" OR MCU OR '
-    'Lucasfilm OR "Star Wars" OR "Индиана Джонс" OR '
-    '"20th Century Studios" OR "Searchlight Pictures" OR '
-    '"National Geographic" OR '
-    'ESPN OR '
-    '"Walt Disney Animation Studios" OR '
-    'Disneyland OR "Disneyland Resort" OR '
-    '"Walt Disney World" OR '
-    '"Disney Cruise Line" OR '
-    '"Inside Out" OR "Головоломка" OR '
-    '"The Mandalorian & Grogu" OR "Мандалорец" OR '
-    '"Moana" OR "Моана" OR '
-    '"Zootopia" OR "Зверополис" OR '
-    '"Frozen" OR "Холодное сердце"'
+    'Disney OR Pixar OR Marvel OR Lucasfilm OR "Star Wars" OR Диснейленд '
+    'site:thewaltdisneycompany.com OR site:daily.afisha.ru'
 )
 
-with st.spinner("Загружаю самые релевантные новости..."):
-    latest_articles, error = fetch_news(relevant_keywords)
+with st.spinner("Загружаю самые релевантные новости из Google..."):
+    latest_articles, error = fetch_google_news(relevant_keywords)
+
+    if latest_articles:
+        st.success(f"Найдено свежих новостей: {len(latest_articles)}")
+
     if error:
         st.error(error)
     elif latest_articles:
-        for article in latest_articles[:7]: # 7 новостей 
+        for article in latest_articles[:7]:
             st.subheader(article['title'])
-            try:
-                date_published = datetime.fromisoformat(article['publishedAt'].replace('Z', '')).strftime('%d.%m.%Y %H:%M')
-            except:
-                date_published = "Неизвестно"
-            
-            st.caption(f"Источник: {article['source']['name']} | Опубликовано: {date_published}")
-            st.markdown(f"[*Читать далее...*]({article['url']})")
+            date_published_str = article.get('date', 'Дата неизвестна')
+            st.caption(f"Источник: {article['source']} | Опубликовано: {date_published_str}")
+            st.write(article.get('snippet', 'Описание отсутствует.')) # Используем snippet 
+            st.markdown(f"[*Читать далее...*]({article['link']})")
             st.divider()
     else:
-        st.info("Не удалось найти свежих новостей по ключевым темам Disney.")
+        st.info("Не удалось найти свежих новостей по ключевым темам Disney в Google.")
 
 # --- Раздел "Поиск новостей" ---
-st.header("🔍 Индивидуальный поиск новостей")
-search_term = st.text_input("Введите ключевые слова для поиска в заголовках (например, 'Avatar 4' или 'Bob Iger'):", "Toy Story 5")
+st.header("🔍 Индивидуальный поиск в Google News")
+search_term = st.text_input("Введите запрос для поиска (например, 'Avatar 4' или 'Bob Iger'):", "Toy Story 5")
 
 if st.button("Найти"):
     if not search_term:
         st.warning("Пожалуйста, введите запрос для поиска.")
     else:
-        with st.spinner(f"Ищу новости по запросу '{search_term}'..."):
-            articles, error = fetch_news(search_term)
+        with st.spinner(f"Ищу в Google News по запросу '{search_term}'..."):
+            articles, error = fetch_google_news(search_term)
+
+            if articles:
+                st.success(f"Найдено результатов: {len(articles)}")
+
             if error:
                 st.error(error)
             elif not articles:
                 st.info(f"Новостей по запросу '{search_term}' не найдено.")
             else:
-                st.success(f"Результаты поиска по запросу '{search_term}':")
                 for article in articles[:10]:
                     st.subheader(article['title'])
-                    try:
-                        date_published = datetime.fromisoformat(article['publishedAt'].replace('Z', '')).strftime('%d.%m.%Y %H:%M')
-                    except:
-                        date_published = "Неизвестно"
-
-                    st.caption(f"Источник: {article['source']['name']} | Опубликовано: {date_published}")
-                    if article['description']:
-                      st.write(article['description'])
-                    st.markdown(f"[*Читать далее...*]({article['url']})")
+                    date_published_str = article.get('date', 'Дата неизвестна')
+                    st.caption(f"Источник: {article['source']} | Опубликовано: {date_published_str}")
+                    st.write(article.get('snippet', 'Описание отсутствует.'))
+                    st.markdown(f"[*Читать далее...*]({article['link']})")
                     st.divider()
-
