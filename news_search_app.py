@@ -5,6 +5,7 @@ from datetime import datetime
 import libsql_client
 import asyncio
 import pandas as pd
+from contextlib import asynccontextmanager
 
 # --- Настройки страницы ---
 st.set_page_config(page_title="Новости и Обсуждения Disney", layout="wide")
@@ -16,24 +17,29 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Подключение к базе данных ---
-db_url = os.getenv("TURSO_URL")
-db_token = os.getenv("TURSO_TOKEN")
-db_client = None
-
-if db_url and db_token:
-    try:
-        db_client = libsql_client.create_client(url=db_url, auth_token=db_token)
-    except Exception as e:
-        st.error(f"Не удалось создать клиент для базы данных: {e}")
+# --- ИЗМЕНЕНИЕ: Создаем асинхронный менеджер контекста для управления подключениями ---
+@asynccontextmanager
+async def get_db_client():
+    """Создает клиент, отдает его и гарантированно закрывает после использования."""
+    db_url = os.getenv("TURSO_URL")
+    db_token = os.getenv("TURSO_TOKEN")
+    
+    if not db_url or not db_token:
+        st.error("Не удалось подключиться к базе данных комментариев. Проверьте секреты TURSO_URL и TURSO_TOKEN в Streamlit Cloud.")
         st.stop()
-else:
-    st.error("Не удалось подключиться к базе данных комментариев. Проверьте секреты TURSO_URL и TURSO_TOKEN в Streamlit Cloud.")
-    st.stop()
 
+    client = None
+    try:
+        client = libsql_client.create_client(url=db_url, auth_token=db_token)
+        yield client
+    finally:
+        if client:
+            await client.close()
+
+# --- ИЗМЕНЕНИЕ: Все функции теперь используют 'async with' для получения клиента ---
 async def init_db_async():
-    if db_client:
-        await db_client.execute("""
+    async with get_db_client() as db:
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS comments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -43,19 +49,18 @@ async def init_db_async():
         """)
 
 async def add_comment_async(name, comment):
-    if db_client:
-        await db_client.execute(
+    async with get_db_client() as db:
+        await db.execute(
             "INSERT INTO comments (name, comment, created_at) VALUES (?, ?, ?)",
             [name, comment, datetime.now()]
         )
 
 async def get_comments_async():
-    if db_client:
-        rs = await db_client.execute("SELECT name, comment, created_at FROM comments ORDER BY created_at DESC;")
+    async with get_db_client() as db:
+        rs = await db.execute("SELECT name, comment, created_at FROM comments ORDER BY created_at DESC;")
         return pd.DataFrame(rs.rows, columns=[col for col in rs.columns])
-    return pd.DataFrame()
 
-# Функция для получения новостей
+# --- Функция для получения новостей (остается без изменений) ---
 @st.cache_data(ttl=3600)
 def fetch_news(search_query, in_title=False):
     api_key = os.getenv("NEWS_API_KEY")
@@ -78,6 +83,8 @@ def fetch_news(search_query, in_title=False):
     except Exception as e:
         return None, f"Ошибка сети: {e}"
 
+# --- Инициализация БД при первом запуске ---
+# Этот вызов создает таблицу, если ее нет.
 asyncio.run(init_db_async())
 
 # === НАЧАЛО ИНТЕРФЕЙСА ПРИЛОЖЕНИЯ ===
@@ -128,6 +135,7 @@ with st.form("comment_form", clear_on_submit=True):
         if name and comment:
             asyncio.run(add_comment_async(name, comment))
             st.success("Спасибо, ваш комментарий добавлен!")
+            st.experimental_rerun() # Обновляем страницу, чтобы сразу увидеть новый комментарий
         else:
             st.warning("Пожалуйста, заполните все поля.")
 
@@ -141,6 +149,11 @@ else:
         with st.container():
             created_time = row['created_at']
             if isinstance(created_time, str):
-                created_time = datetime.fromisoformat(created_time)
+                try:
+                    # Пробуем разные форматы, так как база данных может возвращать разные строки
+                    created_time = datetime.strptime(created_time, '%Y-%m-%d %H:%M:%S.%f')
+                except ValueError:
+                    created_time = datetime.fromisoformat(created_time)
+            
             st.text(f"👤 {row['name']} | 🕓 {created_time.strftime('%d.%m.%Y %H:%M')}")
             st.info(row['comment'])
