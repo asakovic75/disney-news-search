@@ -18,7 +18,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=3600)
+# --- Функция для поиска новостей через Google (Serper.dev) ---
+@st.cache_data(ttl=1800) # Кэшируем результат на 30 минут
 def fetch_google_news(search_query):
     """Ищет новости через Google News API от Serper.dev."""
     api_key = os.getenv("SERPER_API_KEY")
@@ -26,7 +27,8 @@ def fetch_google_news(search_query):
         return None, "Ключ SERPER_API_KEY не найден в секретах."
 
     url = "https://google.serper.dev/news"
-    payload = json.dumps({"q": search_query, "gl": "ru", "hl": "ru"})
+    # Добавляем в запрос требование искать только за последнюю неделю для свежести
+    payload = json.dumps({"q": search_query, "gl": "ru", "hl": "ru", "tbs": "qdr:w"})
     headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
 
     try:
@@ -41,39 +43,54 @@ def fetch_google_news(search_query):
 
 # === ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ===
 st.title("🌐 Дайджест новостей вселенной Disney")
-st.write("Поиск актуальных новостей на любых сайтах, включая официальные источники и тематические блоги.")
+st.write("Автоматический поиск самых актуальных новостей о компаниях, проектах и парках Disney.")
 st.divider()
 
 # --- Раздел "Последние актуальные новости" ---
-st.header("🔥 Последние актуальные новости")
+st.header("🔥 Последние релевантные новости")
 
+# Каждая фраза в кавычках ищется как единое целое. Оператор OR ищет хотя бы одно совпадение.
 relevant_keywords = (
-    'Disney OR Pixar OR Marvel OR Lucasfilm OR "Star Wars" OR Диснейленд '
-    'site:thewaltdisneycompany.com OR site:daily.afisha.ru'
+    # Корпоративные новости
+    '"The Walt Disney Company" OR TWDC OR "Bob Iger" OR "Disney earnings" OR '
+    # Студии и бренды
+    'Pixar OR "Marvel Studios" OR MCU OR Lucasfilm OR "Star Wars" OR '
+    '"20th Century Studios" OR "Searchlight Pictures" OR "Walt Disney Animation Studios" OR '
+    # Парки и продукты
+    'Disneyland OR "Walt Disney World" OR "Disney Cruise Line" OR "Disney merchandise" OR '
+    # Платформы
+    '"Disney+" OR "Disney Plus" OR Hulu OR '
+    # Конкретные проекты (добавлены русские аналоги)
+    '"Inside Out" OR "Головоломка" OR "The Mandalorian & Grogu" OR "Мандалорец" OR '
+    '"Moana" OR "Моана" OR "Zootopia" OR "Зверополис" OR "Frozen" OR "Холодное сердце" OR '
+    '"Toy Story 5" OR "Snow White" OR "Avatar"'
 )
 
-with st.spinner("Загружаю самые релевантные новости из Google..."):
+with st.spinner("Загружаю самые релевантные новости из Google за последнюю неделю..."):
     latest_articles, error = fetch_google_news(relevant_keywords)
-
-    if latest_articles:
-        st.success(f"Найдено свежих новостей: {len(latest_articles)}")
 
     if error:
         st.error(error)
     elif latest_articles:
-        for article in latest_articles[:7]:
+        st.success(f"Найдено свежих новостей по вашим ключевым темам: {len(latest_articles)}")
+        for article in latest_articles[:10]: # Показываем до 10 новостей
             st.subheader(article['title'])
             date_published_str = article.get('date', 'Дата неизвестна')
             st.caption(f"Источник: {article['source']} | Опубликовано: {date_published_str}")
-            st.write(article.get('snippet', 'Описание отсутствует.')) # Используем snippet 
+            st.write(article.get('snippet', 'Описание отсутствует.'))
             st.markdown(f"[*Читать далее...*]({article['link']})")
             st.divider()
     else:
-        st.info("Не удалось найти свежих новостей по ключевым темам Disney в Google.")
+        st.info("Не удалось найти свежих новостей по вашим ключевым темам за последнюю неделю.")
 
-# --- Раздел "Поиск новостей" ---
+# --- Раздел "Индивидуальный поиск" ---
 st.header("🔍 Индивидуальный поиск")
-search_term = st.text_input("Введите запрос для поиска (например, 'Avatar 4' или 'Bob Iger'):", "Toy Story 5")
+st.write("Здесь вы можете использовать более специфичные запросы из вашего списка, например, с именами руководителей или юридическими терминами.")
+
+# Примеры для пользователя
+st.info('Примеры запросов: `Bob Chapek`, `"Disney lawsuit"`, `Florida OR "Reedy Creek"`')
+
+search_term = st.text_input("Введите ваш точный запрос для поиска:", "")
 
 if st.button("Найти"):
     if not search_term:
@@ -82,20 +99,16 @@ if st.button("Найти"):
         with st.spinner(f"Ищу в Google News по запросу '{search_term}'..."):
             articles, error = fetch_google_news(search_term)
 
-            if articles:
-                st.success(f"Найдено результатов: {len(articles)}")
-
             if error:
                 st.error(error)
             elif not articles:
                 st.info(f"Новостей по запросу '{search_term}' не найдено.")
             else:
-                for article in articles[:10]:
+                st.success(f"Найдено результатов: {len(articles)}")
+                for article in articles[:15]:
                     st.subheader(article['title'])
                     date_published_str = article.get('date', 'Дата неизвестна')
                     st.caption(f"Источник: {article['source']} | Опубликовано: {date_published_str}")
                     st.write(article.get('snippet', 'Описание отсутствует.'))
                     st.markdown(f"[*Читать далее...*]({article['link']})")
                     st.divider()
-
-
